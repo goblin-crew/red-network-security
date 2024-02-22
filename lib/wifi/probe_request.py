@@ -13,6 +13,7 @@ from datetime import datetime as dt
 import json
 
 from collections import UserList
+from enum import Enum
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -172,12 +173,349 @@ class ProbeRequestList(UserList):
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# << [DATASTRUCTURES]
+
+# [WORKERS] >>
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# internal classes:
+    
+class StateJumpingException(Exception):
+    def __init__(this, msg: str) -> None:
+        super().__init__(msg)
+
+class ScanSessionState(Enum):
+    unknown = 0
+    initialized = 1
+    started = 2
+    ready = 3
+    running = 4
+    finished = 5
+    joined = 6
+    processed = 7
+    failed = 8
+
+
+class ScanSession:
+    def __init__(this, iface: str):
+        this.__state__: ScanSessionState = ScanSessionState.unknown
+        this.__data__: ProbeRequestList | None = None
+        this.__sniffer_thread__: scsr.AsyncSniffer | None = None
+
+        this.state = ScanSessionState.initialized
+
+        this.iface: str = iface
+
+    @property
+    def data(this) -> ProbeRequestList | None:
+        '''
+        Read-Only interface for session-data
+        '''
+
+        return this.__data__
+    
+    @property
+    def state(this) -> ScanSessionState:
+        '''
+        interface for getting Session-State
+        '''
+
+        return this.__state__
+    
+    @property.setter
+    def state(this, value: ScanSessionState = ScanSessionState.unknown) -> None:
+        '''
+        interface for setting state with validation
+
+        (?) some states can only be set after a particular other
+        '''
+
+        required_prev_state: list[bool] = []
+        always_valid_prev_state: list[bool] = [this.__state_unknown__, this.__state_failed__]
+
+        if isinstance(value, ScanSessionState):
+            if value == ScanSessionState.unknown:
+                required_prev_state = [True]
+
+            elif value == ScanSessionState.initialized:
+                required_prev_state = [this.__state_finished__]
+
+            elif value == ScanSessionState.started:
+                required_prev_state = [this.__state_ready__]
+
+            elif value == ScanSessionState.ready:
+                required_prev_state = [this.__state_initialized__]
+
+            elif value == ScanSessionState.running:
+                required_prev_state = [this.__state_started__]
+
+            elif value == ScanSessionState.finished:
+                required_prev_state = [this.__state_joined__, this.__state_processed__]
+
+            elif value == ScanSessionState.joined:
+                required_prev_state = [this.__state_running__]
+
+            elif value == ScanSessionState.processed:
+                required_prev_state = [this.__state_joined__]
+
+            elif value == ScanSessionState.failed:
+                required_prev_state = [True]
+
+            else:
+                raise ValueError("submitted state is not registered")
+            
+            if not True in required_prev_state and not True in always_valid_prev_state:
+                raise StateJumpingException(f"Cannot set state [{ScanSessionState(value).name}] after current state [{ScanSessionState(this.state).name}]")
+        else:
+            raise TypeError(f"cannot set state of type ({type(value).__name__}) --> type must be (ScanSessionState)")
+
+        this.__state__ = value
+
+    @property
+    def __state_unknown__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'unknown'
+        '''
+
+        return bool(this.state == ScanSessionState.unknown)
+
+    @property
+    def __state_initialized__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'initialized'
+        '''
+
+        return bool(this.state == ScanSessionState.initialized)
+
+    @property
+    def __state_started__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'started'
+        '''
+
+        return bool(this.state == ScanSessionState.started)
+    
+    @property
+    def __state_ready__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'ready'
+        '''
+
+        return bool(this.state == ScanSessionState.ready)
+
+    @property
+    def __state_running__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'running'
+        '''
+
+        return bool(this.state == ScanSessionState.running)
+    
+    @property
+    def __state_finished__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'finished'
+        '''
+
+        return bool(this.state == ScanSessionState.finished)
+    
+    @property
+    def __state_joined__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'joined'
+        '''
+
+        return bool(this.state == ScanSessionState.joined)
+    
+    @property
+    def __state_processed__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'processed'
+        '''
+
+        return bool(this.state == ScanSessionState.processed)
+    
+    @property
+    def __state_failed__(this) -> bool:
+        '''
+        Read-Only boolean property that indicates if the Session-State is 'failed'
+        '''
+
+        return bool(this.state == ScanSessionState.failed)
+
+
+    def __pre__(this) -> Self:
+        '''
+        Tasks to Run before Scan (Preparation phase)
+        '''
+        
+        this.__reset__() # ensure no previous data, values etc. are present and the values are as if they where untouched
+
+        # ...
+        #! TODO - check if interface is wlan
+        #! TODO - check if interface is up
+        #! TODO - check if interface is in monitoring mode
+        #! TODO - (optional) set interface up
+        #! TODO - (optional) set interface to monitoring mode
+
+        if this.__sniffer_thread__ == None:
+            this.__sniffer_thread__ = scsr.AsyncSniffer() #! TODO
+            this.state = ScanSessionState.ready
+        else:
+            raise RuntimeError("A Sniffer-Thread is already present, for safety reasons cannot redefine property")
+
+        return this
+    
+    def __start__(this) -> Self:
+        '''
+        Starts the Sniffer
+        '''
+
+        if this.__sniffer_thread__ != None:
+            this.__sniffer_thread__.start()
+            this.state = ScanSessionState.started
+        else:
+            return ValueError("Cannot start Sniffer thread --> sniffer is None")
+
+        
+        return this
+
+    def __await_join__(this) -> Self:
+        '''
+        Joins the Sniffer Thread with main
+        (?) waits until Sniffer-Thread has finished, then returns
+        '''
+
+        if this.__sniffer_thread__ != None and this.__sniffer_thread__.running:
+            this.__sniffer_thread__.join()
+            this.state = ScanSessionState.joined
+        else:
+            return ValueError("Cannot join Sniffer thread --> sniffer is None")
+
+        return this
+
+    def __process_data__(this, data: list[Packet]) -> Self:
+        '''
+        Processes the captured data to a [ProbeRequestList]
+        ans set the internal '__data__' property to this value
+        '''
+
+        #! TODO ...
+
+        this.state = ScanSessionState.processed
+        
+        return this
+
+    def __post__(this) -> Self:
+        '''
+        Tasks after scan was successfully runned and joined
+        (!) the post-data processing happens here, but is defined in another method
+        '''
+
+        #! TODO
+
+        this.__process_data__()
+        this.state = ScanSessionState.finished
+
+        return this
+
+    def __on_failed_cleanup__(this) -> Self:
+        '''
+        Cleanup Tasks when Scan(-session) has failed
+        '''
+
+        #! TODO
+
+        return this
+
+    def __on_failed__(this) -> None:
+        '''
+        Handles Scan(-session) failure
+        '''
+
+        #! TODO ...
+        this.state = ScanSessionState.failed
+        
+        #! TODO cleanup tasks
+
+        #! TODO Raise Error
+
+    def __reset__(this) -> Self:
+        '''
+        Resets Session and its Properties to initialized State
+
+        (?) usefull if the Session should be reused or reruned
+            or to ensure no previous Data is present
+
+            --> keeps config
+        '''
+
+        #! TODO Validate that no thread is currently running and/or terminate it
+
+        this.__state__: ScanSessionState = ScanSessionState.unknown
+        this.__data__: ProbeRequestList | None = None
+        this.__sniffer_thread__: scsr.AsyncSniffer | None = None
+
+        this.state = ScanSessionState.initialized
+
+        return this
+    
+    def start(this) -> Self:
+        #! TODO
+
+        return this
+    
+    def stop(this) -> Self:
+        #! TODO
+    
+        return this
+    
+    def await_result(this) -> Self:
+        #! TODO
+        
+        return this
+    
+    def terminate(this) -> Self:
+        #! TODO
+
+        return this
+    
+    def reset(this) -> Self:
+        #! TODO validation tasks
+        
+        this.__reset__()
+        return this
+    
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Static Class to scan for Wifi-Client Probe Requests
 class Scanner:
     def __init__(this, wifi_iface: str):
         this.iface: str = wifi_iface
         this.sniffer: scsr.AsyncSniffer | None = None
+
+    def __pre__(this):
+        pass
+
+    def __post__(this):
+        pass
+
+    def __await_join__(this):
+        pass
+
+    def __begin_scan__(this):
+        pass
+
+    def __end_scan__(this):
+        pass
+
+    def start(this) -> None:
+        pass
+
+    def stop(this) -> ProbeRequestList:
+        pass
+
 
     def scan(this, count: int = 0) -> ProbeRequestList:
         if this.sniffer == None:
