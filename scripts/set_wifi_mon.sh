@@ -2,7 +2,7 @@
 ACTION="${1}"
 IFACE="${2}"
 
-apt install wireless-tools -y
+apt install wireless-tools net-tools -y
 
 if [ "$ACTION" = "on" ]; then
     echo "enabling monitoring mode on wifi-interface [${IFACE}]"
