@@ -1,8 +1,6 @@
-from dataclasses import dataclass
 from typing import Any, Self
 
-import scapy as sc
-from scapy import all as sca
+
 from scapy import sendrecv as scsr
 from scapy.layers import dot11 as d11
 from scapy.packet import Packet
@@ -15,6 +13,8 @@ import json
 
 from collections import UserList
 from enum import Enum
+
+import os
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -199,6 +199,16 @@ class ScanSessionState(Enum):
 
 class Scanner:
     def __init__(this, iface: str, count: int = 0, timeout = None):
+        # NOTE:
+        # This OS-check & restriction is temporarily --> not sure if it will work on windows
+        
+        os_type = os.name
+        if os_type != "posix":
+            raise RuntimeError("OS not Supported, please run on Linux or other posix OS")
+        
+        ###############
+        
+
         this.__state__: ScanSessionState = ScanSessionState.unknown
         this.__data__: ProbeRequestList | None = None
         this.__sniffer_thread__: scsr.AsyncSniffer | None = None
