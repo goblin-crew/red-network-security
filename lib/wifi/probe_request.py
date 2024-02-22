@@ -6,6 +6,7 @@ from scapy import all as sca
 from scapy import sendrecv as scsr
 from scapy.layers import dot11 as d11
 from scapy.packet import Packet
+from scapy.plist import PacketList
 
 import datetime
 from datetime import datetime as dt
@@ -82,7 +83,7 @@ class ProbeRequest:
         this.ssid: str = f"{this.packet.info}"
 
     def __str__(this) -> str:
-        return json.dumps({"timestamp": this.timestamp, "mac": this.mac, "ssid": this.ssid})
+        return json.dumps({"timestamp": this.timestamp.strftime("%d/%m/%Y | %H:%M:%S"), "mac": this.mac, "ssid": this.ssid})
     
         
         # [COORDINATES WHERE THE PACKET WAS CAPTURED -- MAY BE IMPLEMENTED LATER]
@@ -196,15 +197,20 @@ class ScanSessionState(Enum):
     failed = 8
 
 
-class ScanSession:
-    def __init__(this, iface: str):
+class Scanner:
+    def __init__(this, iface: str, count: int = 0, timeout = None):
         this.__state__: ScanSessionState = ScanSessionState.unknown
         this.__data__: ProbeRequestList | None = None
         this.__sniffer_thread__: scsr.AsyncSniffer | None = None
 
         this.state = ScanSessionState.initialized
 
-        this.iface: str = iface
+        this.config: dict = {
+            'iface': iface,
+            'count': count,
+            'timeout': timeout,
+            'monitor_mode': True
+        }
 
     @property
     def data(this) -> ProbeRequestList | None:
@@ -342,7 +348,7 @@ class ScanSession:
         '''
 
         return bool(this.state == ScanSessionState.failed)
-
+    
 
     def __pre__(this) -> Self:
         '''
@@ -352,14 +358,24 @@ class ScanSession:
         this.__reset__() # ensure no previous data, values etc. are present and the values are as if they where untouched
 
         # ...
-        #! TODO - check if interface is wlan
-        #! TODO - check if interface is up
-        #! TODO - check if interface is in monitoring mode
-        #! TODO - (optional) set interface up
-        #! TODO - (optional) set interface to monitoring mode
 
         if this.__sniffer_thread__ == None:
-            this.__sniffer_thread__ = scsr.AsyncSniffer() #! TODO
+            def handle_packet(pkt):
+                if pkt.haslayer(d11.Dot11ProbeReq):
+                    prq = ProbeRequest(packet=pkt, timestamp=dt.now())
+
+                    print(f"{prq.timestamp.strftime("%d/%m/%Y | %H:%M:%S")}\t\t[{prq.mac}]\t\t{prq.ssid}")
+
+
+            this.__sniffer_thread__ = scsr.AsyncSniffer(
+                iface=this.config['iface'], 
+                count=this.config['count'], 
+                monitor=this.config['monitor'], 
+                timeout=this.config['timeout'],
+                lfilter = lambda pkt: pkt.haslayer(d11.Dot11ProbeReq),
+                prn=handle_packet
+            )
+
             this.state = ScanSessionState.ready
         else:
             raise RuntimeError("A Sniffer-Thread is already present, for safety reasons cannot redefine property")
@@ -394,13 +410,18 @@ class ScanSession:
 
         return this
 
-    def __process_data__(this, data: list[Packet]) -> Self:
+    def __process_data__(this, data: PacketList) -> Self:
         '''
         Processes the captured data to a [ProbeRequestList]
         ans set the internal '__data__' property to this value
         '''
 
-        #! TODO ...
+        this.__data__: ProbeRequestList = ProbeRequestList([])
+
+        for pkt in data:
+            if pkt.haslayer(d11.Dot11ProbeReq):
+                prq = ProbeRequest(packet=pkt, timestamp=pkt.sent_time)
+                this.__data__.append(prq)
 
         this.state = ScanSessionState.processed
         
@@ -412,9 +433,8 @@ class ScanSession:
         (!) the post-data processing happens here, but is defined in another method
         '''
 
-        #! TODO
-
-        this.__process_data__()
+        rslt = this.__sniffer_thread__.results
+        this.__process_data__(rslt)
         this.state = ScanSessionState.finished
 
         return this
@@ -440,6 +460,14 @@ class ScanSession:
 
         #! TODO Raise Error
 
+    def __stop__(this) -> Self:
+        if this.__sniffer_thread__.running:
+            this.__sniffer_thread__.stop()
+
+        this.state = ScanSessionState.joined
+
+        return this
+
     def __reset__(this) -> Self:
         '''
         Resets Session and its Properties to initialized State
@@ -450,7 +478,8 @@ class ScanSession:
             --> keeps config
         '''
 
-        #! TODO Validate that no thread is currently running and/or terminate it
+        if this.__sniffer_thread__.running:
+            this.__sniffer_thread__.stop()
 
         this.__state__: ScanSessionState = ScanSessionState.unknown
         this.__data__: ProbeRequestList | None = None
@@ -461,69 +490,25 @@ class ScanSession:
         return this
     
     def start(this) -> Self:
-        #! TODO
+        this.__pre__().__start__()
 
         return this
     
     def stop(this) -> Self:
-        #! TODO
+        this.__stop__().__post__()
     
         return this
     
     def await_result(this) -> Self:
-        #! TODO
+        this.__await_join__().__post__()
         
-        return this
-    
-    def terminate(this) -> Self:
-        #! TODO
-
         return this
     
     def reset(this) -> Self:
-        #! TODO validation tasks
-        
         this.__reset__()
         return this
     
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# Static Class to scan for Wifi-Client Probe Requests
-class Scanner:
-    def __init__(this, wifi_iface: str):
-        this.iface: str = wifi_iface
-        this.sniffer: scsr.AsyncSniffer | None = None
 
-    def __pre__(this):
-        pass
-
-    def __post__(this):
-        pass
-
-    def __await_join__(this):
-        pass
-
-    def __begin_scan__(this):
-        pass
-
-    def __end_scan__(this):
-        pass
-
-    def start(this) -> None:
-        pass
-
-    def stop(this) -> ProbeRequestList:
-        pass
-
-
-    def scan(this, count: int = 0) -> ProbeRequestList:
-        if this.sniffer == None:
-            this.__prb_req_list = ProbeRequestList()
-            this.sniffer = scsr.AsyncSniffer(iface=this.iface, count=count, prn=this.__handle_packet)
-
-    def __handle_packet(this, packet) -> None:
-        if isinstance(packet, Packet):
-            if packet.haslayer(d11.Dot11ProbeReq):
-                prb_req: ProbeRequest = ProbeRequest(packet=packet, timestamp=dt.now())
-                this.__prb_req_list.append(prb_req)
