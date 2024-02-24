@@ -1,6 +1,6 @@
 #!/bin/bash
 ACTION="${1}"
-IFACE="${2}"
+IFACE="wlp0s20f3"
 
 apt install wireless-tools net-tools -y
 
