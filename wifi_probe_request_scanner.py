@@ -17,4 +17,4 @@ if __name__ == '__main__':
     scanner.stop()
 
     for i in scanner.data:
-        print(f"({i.timestamp.strftime('%d/%m/%Y | %H:%M:%S')})\t\t[{i.mac}]\t\t{i.ssid}")
+        print(f"({i.ts_str})\t\t[{i.mac}]\t\t{i.ssid}")

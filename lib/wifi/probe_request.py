@@ -78,12 +78,13 @@ class ProbeRequest:
     def __init__(this, packet: Packet, timestamp: datetime.datetime = dt.now(), capture_location=False):
         this.packet: Packet = packet
         this.timestamp: datetime.datetime = timestamp
+        this.ts_str: str = this.timestamp.strftime("%d/%m/%Y | %H:%M:%S")
         this.mac: str = f"{this.packet.addr2}"
         this.bssid: str = this.mac
         this.ssid: str = f"{this.packet.info}"
 
     def __str__(this) -> str:
-        return json.dumps({"timestamp": this.timestamp.strftime("%d/%m/%Y | %H:%M:%S"), "mac": this.mac, "ssid": this.ssid})
+        return json.dumps({"timestamp": this.ts_str, "mac": this.mac, "ssid": this.ssid})
     
         
         # [COORDINATES WHERE THE PACKET WAS CAPTURED -- MAY BE IMPLEMENTED LATER]
@@ -374,7 +375,7 @@ class Scanner:
                 if pkt.haslayer(d11.Dot11ProbeReq):
                     prq = ProbeRequest(packet=pkt, timestamp=dt.now())
 
-                    print(f"{prq.timestamp.strftime("%d/%m/%Y | %H:%M:%S")}\t\t[{prq.mac}]\t\t{prq.ssid}")
+                    print(f"{prq.ts_str}\t\t[{prq.mac}]\t\t{prq.ssid}")
 
 
             this.__sniffer_thread__ = scsr.AsyncSniffer(
