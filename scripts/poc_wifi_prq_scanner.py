@@ -23,7 +23,7 @@ def handle_packet(pkt: Packet):
 
         print(f"({timestamp})\t[{mac_addr}]\t-->\t{ssid}")
 
-sniffer: AsyncSniffer = AsyncSniffer(iface=config["IFACE"], prn=handle_packet, count=0, store=False)
+sniffer: AsyncSniffer = AsyncSniffer(iface=config["IFACE"], prn=handle_packet, count=0, store=False, monitor=True)
 
 print("Start Sniffer...")
 sniffer.start()
